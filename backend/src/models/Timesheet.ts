@@ -1,7 +1,7 @@
 import mongoose, { type InferSchemaType } from "mongoose";
 import { startOfUtcDay, toJsonTransform } from "../utils/serialize.js";
 
-export const TIMESHEET_STATUSES = ["pending", "not_filled", "approved"] as const;
+export const TIMESHEET_STATUSES = ["pending", "not_filled", "approved", "rejected"] as const;
 export type TimesheetStatus = (typeof TIMESHEET_STATUSES)[number];
 
 const timesheetSchema = new mongoose.Schema(
@@ -15,6 +15,12 @@ const timesheetSchema = new mongoose.Schema(
       type: String,
       default: "",
       trim: true,
+    },
+    hours: {
+      type: Number,
+      required: true,
+      min: 0.5,
+      max: 24,
     },
     date: {
       type: Date,

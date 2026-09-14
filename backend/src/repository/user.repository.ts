@@ -36,9 +36,31 @@ export const userRepository = {
     return toPlain<UserRecord>(doc);
   },
 
+  async findByIds(ids: string[]): Promise<UserRecord[]> {
+    if (ids.length === 0) {
+      return [];
+    }
+    const docs = await User.find({ _id: { $in: ids } });
+    return docs.map((doc) => toPlain<UserRecord>(doc) as UserRecord);
+  },
+
   async findByEmail(email: string): Promise<UserRecord | null> {
     const doc = await User.findOne({ email: email.toLowerCase().trim() });
     return toPlain<UserRecord>(doc);
+  },
+
+  async findByEmailWithPassword(
+    email: string,
+  ): Promise<(UserRecord & { passwordHash: string }) | null> {
+    const doc = await User.findOne({ email: email.toLowerCase().trim() }).select("+passwordHash");
+    if (!doc) {
+      return null;
+    }
+    const plain = toPlain<UserRecord>(doc);
+    if (!plain) {
+      return null;
+    }
+    return { ...plain, passwordHash: doc.passwordHash };
   },
 
   async findReports(managerId: string): Promise<UserRecord[]> {

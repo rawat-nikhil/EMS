@@ -4,6 +4,9 @@ import { startOfUtcDay, toJsonTransform } from "../utils/serialize.js";
 export const ATTENDANCE_STATUSES = ["pending", "rejected", "approved"] as const;
 export type AttendanceStatus = (typeof ATTENDANCE_STATUSES)[number];
 
+export const LEAVE_TYPES = ["sick", "paid", "casual", "optional"] as const;
+export type LeaveType = (typeof LEAVE_TYPES)[number];
+
 const attendanceSchema = new mongoose.Schema(
   {
     employeeId: {
@@ -15,6 +18,11 @@ const attendanceSchema = new mongoose.Schema(
       type: String,
       default: "",
       trim: true,
+    },
+    leaveType: {
+      type: String,
+      enum: LEAVE_TYPES,
+      required: true,
     },
     date: {
       type: Date,
