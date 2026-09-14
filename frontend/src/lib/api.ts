@@ -16,7 +16,7 @@ type RequestOptions = Omit<RequestInit, "body"> & {
 };
 
 export async function api<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { token, body, headers: initHeaders, ...rest } = options;
+  const { token, body, headers: initHeaders, cache, ...rest } = options;
   const headers = new Headers(initHeaders);
 
   if (body !== undefined) {
@@ -28,6 +28,7 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
 
   const res = await fetch(`${API_URL}${path}`, {
     ...rest,
+    cache: cache ?? "no-store",
     headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });

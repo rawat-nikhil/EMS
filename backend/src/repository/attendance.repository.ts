@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import {
   Attendance,
   type AttendanceDoc,
@@ -21,6 +22,26 @@ export type UpdateAttendanceInput = Partial<
   Pick<CreateAttendanceInput, "description" | "leaveType" | "date" | "status" | "approvedBy">
 >;
 
+function asObjectId(id: string): mongoose.Types.ObjectId | null {
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return null;
+  }
+  return new mongoose.Types.ObjectId(id);
+}
+
+function withEmployeeObjectId<T extends { employeeId: string; approvedBy?: string }>(data: T) {
+  const employeeId = asObjectId(data.employeeId);
+  if (!employeeId) {
+    throw new Error("Invalid employee id");
+  }
+  const approvedBy = data.approvedBy ? asObjectId(data.approvedBy) : undefined;
+  return {
+    ...data,
+    employeeId,
+    ...(approvedBy ? { approvedBy } : {}),
+  };
+}
+
 function withNormalizedDate<T extends { date?: Date }>(data: T): T {
   if (!data.date) {
     return data;
@@ -30,12 +51,12 @@ function withNormalizedDate<T extends { date?: Date }>(data: T): T {
 
 export const attendanceRepository = {
   async create(data: CreateAttendanceInput): Promise<AttendanceRecord> {
-    const doc = await Attendance.create(withNormalizedDate(data));
+    const doc = await Attendance.create(withEmployeeObjectId(withNormalizedDate(data)));
     return toPlain<AttendanceRecord>(doc) as AttendanceRecord;
   },
 
   async createMany(rows: CreateAttendanceInput[]): Promise<AttendanceRecord[]> {
-    const docs = await Attendance.insertMany(rows.map((row) => withNormalizedDate(row)));
+    const docs = await Attendance.insertMany(rows.map((row) => withEmployeeObjectId(withNormalizedDate(row))));
     return docs.map((doc) => toPlain<AttendanceRecord>(doc) as AttendanceRecord);
   },
 
@@ -45,21 +66,33 @@ export const attendanceRepository = {
   },
 
   async findByEmployeeAndDate(employeeId: string, date: Date): Promise<AttendanceRecord | null> {
+    const id = asObjectId(employeeId);
+    if (!id) {
+      return null;
+    }
     const doc = await Attendance.findOne({
-      employeeId,
+      employeeId: id,
       date: startOfUtcDay(date),
     });
     return toPlain<AttendanceRecord>(doc);
   },
 
   async findByEmployeeId(employeeId: string): Promise<AttendanceRecord[]> {
-    const docs = await Attendance.find({ employeeId }).sort({ date: -1 });
+    const id = asObjectId(employeeId);
+    if (!id) {
+      return [];
+    }
+    const docs = await Attendance.find({ employeeId: id }).sort({ date: -1 });
     return docs.map((doc) => toPlain<AttendanceRecord>(doc) as AttendanceRecord);
   },
 
   async findByEmployeeInRange(employeeId: string, from: Date, to: Date): Promise<AttendanceRecord[]> {
+    const id = asObjectId(employeeId);
+    if (!id) {
+      return [];
+    }
     const docs = await Attendance.find({
-      employeeId,
+      employeeId: id,
       date: { $gte: startOfUtcDay(from), $lte: startOfUtcDay(to) },
     }).sort({ date: 1 });
     return docs.map((doc) => toPlain<AttendanceRecord>(doc) as AttendanceRecord);
@@ -73,8 +106,12 @@ export const attendanceRepository = {
     if (employeeIds.length === 0) {
       return [];
     }
+    const ids = employeeIds.map(asObjectId).filter((id): id is mongoose.Types.ObjectId => id !== null);
+    if (ids.length === 0) {
+      return [];
+    }
     const docs = await Attendance.find({
-      employeeId: { $in: employeeIds },
+      employeeId: { $in: ids },
       status: "pending",
     }).sort({ date: 1 });
     return docs.map((doc) => toPlain<AttendanceRecord>(doc) as AttendanceRecord);

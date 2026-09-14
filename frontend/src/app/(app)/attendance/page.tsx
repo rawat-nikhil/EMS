@@ -15,6 +15,7 @@ import {
   type LeaveType,
 } from "@/lib/attendance";
 import { useAuth } from "@/context/auth-context";
+import { REFRESH_ATTENDANCE_EVENT } from "@/lib/refresh-events";
 
 export default function AttendancePage() {
   const { token, user } = useAuth();
@@ -26,7 +27,8 @@ export default function AttendancePage() {
 
   const [year, setYear] = useState(initial.year);
   const [monthIndex, setMonthIndex] = useState(initial.monthIndex);
-  const [leaves, setLeaves] = useState<LeaveRecord[]>([]);
+  const [monthLeaves, setMonthLeaves] = useState<LeaveRecord[]>([]);
+  const [statusLeaves, setStatusLeaves] = useState<LeaveRecord[]>([]);
   const [pendingReviews, setPendingReviews] = useState<LeaveRecord[]>([]);
   const [selectedDate, setSelectedDate] = useState<string | null>(today);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -42,7 +44,7 @@ export default function AttendancePage() {
 
   const canReview = user?.role === "admin" || user?.role === "reporting_manager";
 
-  const loadLeaves = useCallback(async () => {
+  const loadMonthLeaves = useCallback(async () => {
     if (!token) {
       return;
     }
@@ -51,8 +53,16 @@ export default function AttendancePage() {
       `/api/attendance?from=${range.from}&to=${range.to}`,
       { token },
     );
-    setLeaves(data.leaves);
+    setMonthLeaves(data.leaves);
   }, [token, year, monthIndex]);
+
+  const loadStatusLeaves = useCallback(async () => {
+    if (!token) {
+      return;
+    }
+    const data = await api<{ leaves: LeaveRecord[] }>("/api/attendance", { token });
+    setStatusLeaves(data.leaves);
+  }, [token]);
 
   const loadPending = useCallback(async () => {
     if (!token || !canReview) {
@@ -62,16 +72,37 @@ export default function AttendancePage() {
     setPendingReviews(data.leaves);
   }, [token, canReview]);
 
+  const reloadAttendance = useCallback(async () => {
+    setLoadError(null);
+    await Promise.all([loadMonthLeaves(), loadStatusLeaves(), loadPending()]);
+  }, [loadMonthLeaves, loadStatusLeaves, loadPending]);
+
   useEffect(() => {
     void (async () => {
       try {
-        setLoadError(null);
-        await Promise.all([loadLeaves(), loadPending()]);
+        await reloadAttendance();
       } catch (err) {
         setLoadError(err instanceof ApiError ? err.message : "Unable to load attendance");
       }
     })();
-  }, [loadLeaves, loadPending]);
+  }, [reloadAttendance]);
+
+  useEffect(() => {
+    function onRefresh() {
+      if (document.visibilityState === "hidden") {
+        return;
+      }
+      void reloadAttendance().catch((err) => {
+        setLoadError(err instanceof ApiError ? err.message : "Unable to load attendance");
+      });
+    }
+    window.addEventListener(REFRESH_ATTENDANCE_EVENT, onRefresh);
+    document.addEventListener("visibilitychange", onRefresh);
+    return () => {
+      window.removeEventListener(REFRESH_ATTENDANCE_EVENT, onRefresh);
+      document.removeEventListener("visibilitychange", onRefresh);
+    };
+  }, [reloadAttendance]);
 
   async function applyLeave() {
     setError(null);
@@ -83,7 +114,7 @@ export default function AttendancePage() {
         body: { from, to, leaveType, description },
       });
       setDescription("");
-      await loadLeaves();
+      await Promise.all([loadMonthLeaves(), loadStatusLeaves()]);
       setStatusTab("pending");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Unable to apply leave");
@@ -100,7 +131,7 @@ export default function AttendancePage() {
         token,
         body: { status },
       });
-      await Promise.all([loadLeaves(), loadPending()]);
+      await Promise.all([loadMonthLeaves(), loadStatusLeaves(), loadPending()]);
     } finally {
       setReviewingId(null);
     }
@@ -119,7 +150,7 @@ export default function AttendancePage() {
             <AttendanceCalendar
               year={year}
               monthIndex={monthIndex}
-              leaves={leaves}
+              leaves={monthLeaves}
               selectedDate={selectedDate}
               onMonthChange={(nextYear, nextMonth) => {
                 setYear(nextYear);
@@ -164,7 +195,7 @@ export default function AttendancePage() {
         </CardHeader>
         <CardContent>
           <LeaveStatusList
-            leaves={leaves}
+            leaves={statusLeaves}
             tab={statusTab}
             selectedId={selectedId}
             onTabChange={setStatusTab}

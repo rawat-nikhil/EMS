@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
+import { clearAllChatSessions } from "@/lib/chat-session";
 
 const TOKEN_KEY = "ems_token";
 
@@ -34,6 +35,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const clearSession = useCallback(() => {
     localStorage.removeItem(TOKEN_KEY);
+    clearAllChatSessions();
     setToken(null);
     setUser(null);
   }, []);

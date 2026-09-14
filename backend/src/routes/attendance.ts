@@ -2,30 +2,14 @@ import { Router } from "express";
 import { authenticate } from "../auth/authenticate.js";
 import { authorize, PERMISSIONS, RESOURCES, type Actor } from "../auth/permissions.js";
 import { ROLES } from "../auth/roles.js";
-import { LEAVE_TYPES, type LeaveType } from "../models/Attendance.js";
 import { attendanceRepository } from "../repository/attendance.repository.js";
 import { userRepository } from "../repository/user.repository.js";
-import { eachUtcDay, startOfUtcDay } from "../utils/serialize.js";
+import { applyLeaveForEmployee, parseLeaveDate } from "../services/leave.service.js";
 
 export const attendanceRouter = Router();
 
 function parseDate(value: unknown): Date | null {
-  if (typeof value !== "string" || !value.trim()) {
-    return null;
-  }
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return null;
-  }
-  return startOfUtcDay(parsed);
-}
-
-function isLeaveType(value: unknown): value is LeaveType {
-  return typeof value === "string" && (LEAVE_TYPES as readonly string[]).includes(value);
-}
-
-function isDuplicateKeyError(err: unknown): boolean {
-  return typeof err === "object" && err !== null && "code" in err && (err as { code: number }).code === 11000;
+  return parseLeaveDate(value);
 }
 
 function publicEmployee(user: { id: string; name: string; email: string }) {
@@ -47,6 +31,10 @@ async function withEmployees<T extends { employeeId: unknown }>(rows: T[]) {
 
 async function requireActor(req: { user?: Actor }) {
   return req.user ?? null;
+}
+
+function noStore(res: { setHeader: (name: string, value: string) => void }) {
+  res.setHeader("Cache-Control", "no-store");
 }
 
 attendanceRouter.use(authenticate);
@@ -71,6 +59,7 @@ attendanceRouter.get("/pending", async (req, res, next) => {
             (await userRepository.findReports(actor.id)).map((user) => user.id),
           );
 
+    noStore(res);
     res.json({ leaves: await withEmployees(pending) });
   } catch (err) {
     next(err);
@@ -85,15 +74,20 @@ attendanceRouter.get("/", async (req, res, next) => {
       return;
     }
 
-    const from = parseDate(req.query.from);
-    const to = parseDate(req.query.to);
-    if (!from || !to) {
-      res.status(400).json({ error: "from and to dates are required" });
-      return;
-    }
-    if (from.getTime() > to.getTime()) {
-      res.status(400).json({ error: "from must be on or before to" });
-      return;
+    const hasFrom = typeof req.query.from === "string" && req.query.from.trim();
+    const hasTo = typeof req.query.to === "string" && req.query.to.trim();
+    const from = hasFrom ? parseDate(req.query.from) : null;
+    const to = hasTo ? parseDate(req.query.to) : null;
+
+    if (hasFrom || hasTo) {
+      if (!from || !to) {
+        res.status(400).json({ error: "from and to dates are required" });
+        return;
+      }
+      if (from.getTime() > to.getTime()) {
+        res.status(400).json({ error: "from must be on or before to" });
+        return;
+      }
     }
 
     const requestedId =
@@ -107,7 +101,11 @@ attendanceRouter.get("/", async (req, res, next) => {
       return;
     }
 
-    const leaves = await attendanceRepository.findByEmployeeInRange(requestedId, from, to);
+    const leaves =
+      from && to
+        ? await attendanceRepository.findByEmployeeInRange(requestedId, from, to)
+        : await attendanceRepository.findByEmployeeId(requestedId);
+    noStore(res);
     res.json({ leaves: await withEmployees(leaves) });
   } catch (err) {
     next(err);
@@ -128,49 +126,20 @@ attendanceRouter.post("/", async (req, res, next) => {
       return;
     }
 
-    const from = parseDate(req.body?.from);
-    const to = parseDate(req.body?.to);
-    const leaveType = req.body?.leaveType;
-    const description = typeof req.body?.description === "string" ? req.body.description.trim() : "";
+    const result = await applyLeaveForEmployee({
+      employeeId: actor.id,
+      from: req.body?.from,
+      to: req.body?.to,
+      leaveType: req.body?.leaveType,
+      description: req.body?.description,
+    });
 
-    if (!from || !to) {
-      res.status(400).json({ error: "from and to dates are required" });
-      return;
-    }
-    if (from.getTime() > to.getTime()) {
-      res.status(400).json({ error: "from must be on or before to" });
-      return;
-    }
-    if (!isLeaveType(leaveType)) {
-      res.status(400).json({ error: "A valid leave type is required" });
+    if (!result.ok) {
+      res.status(result.status).json({ error: result.error });
       return;
     }
 
-    const overlap = await attendanceRepository.findOverlapping(actor.id, from, to);
-    if (overlap.length > 0) {
-      res.status(409).json({ error: "Leave already exists for one or more dates" });
-      return;
-    }
-
-    const days = eachUtcDay(from, to);
-    try {
-      const leaves = await attendanceRepository.createMany(
-        days.map((date) => ({
-          employeeId: actor.id,
-          date,
-          leaveType,
-          description,
-          status: "pending" as const,
-        })),
-      );
-      res.status(201).json({ leaves: await withEmployees(leaves) });
-    } catch (err) {
-      if (isDuplicateKeyError(err)) {
-        res.status(409).json({ error: "Leave already exists for one or more dates" });
-        return;
-      }
-      throw err;
-    }
+    res.status(201).json({ leaves: await withEmployees(result.leaves) });
   } catch (err) {
     next(err);
   }
