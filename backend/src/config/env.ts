@@ -1,18 +1,11 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
+import { required } from "../utils/env.js";
 
 const backendRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
 dotenv.config({ path: path.join(backendRoot, ".env") });
-
-function required(name: string): string {
-  const value = process.env[name];
-  if (!value) {
-    throw new Error(`Missing required environment variable: ${name}`);
-  }
-  return value;
-}
 
 export const env = {
   PORT: Number(process.env.PORT) || 4000,
