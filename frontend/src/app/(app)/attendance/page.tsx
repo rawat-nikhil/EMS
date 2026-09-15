@@ -15,7 +15,7 @@ import {
   type LeaveType,
 } from "@/lib/attendance";
 import { useAuth } from "@/context/auth-context";
-import { REFRESH_ATTENDANCE_EVENT } from "@/lib/refresh-events";
+import { dispatchRefreshAttendance, REFRESH_ATTENDANCE_EVENT } from "@/lib/refresh-events";
 
 export default function AttendancePage() {
   const { token, user } = useAuth();
@@ -116,6 +116,7 @@ export default function AttendancePage() {
       setDescription("");
       await Promise.all([loadMonthLeaves(), loadStatusLeaves()]);
       setStatusTab("pending");
+      dispatchRefreshAttendance();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Unable to apply leave");
     } finally {
@@ -132,6 +133,7 @@ export default function AttendancePage() {
         body: { status },
       });
       await Promise.all([loadMonthLeaves(), loadStatusLeaves(), loadPending()]);
+      dispatchRefreshAttendance();
     } finally {
       setReviewingId(null);
     }

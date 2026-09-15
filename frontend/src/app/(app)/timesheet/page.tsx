@@ -10,6 +10,7 @@ import { api, ApiError } from "@/lib/api";
 import { startOfUtcWeek, toDateKey, weekDayKeys } from "@/lib/dates";
 import type { TimesheetRecord, TimesheetStatus, WeekDayDraft } from "@/lib/timesheet";
 import { useAuth } from "@/context/auth-context";
+import { dispatchRefreshTimesheet } from "@/lib/refresh-events";
 
 function preferredStatusTab(rows: TimesheetRecord[], current: TimesheetStatus): TimesheetStatus {
   const pending = rows.filter((row) => row.status === "pending").length;
@@ -128,6 +129,7 @@ export default function TimesheetPage() {
       });
       setStatusTab("pending");
       await loadWeek();
+      dispatchRefreshTimesheet();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Unable to submit timesheet");
     } finally {
@@ -145,6 +147,7 @@ export default function TimesheetPage() {
       });
       await Promise.all([loadWeek(), loadPending(), loadTeam()]);
       setTeamTab(status);
+      dispatchRefreshTimesheet();
     } finally {
       setReviewingId(null);
     }
