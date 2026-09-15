@@ -98,6 +98,32 @@ export const attendanceRepository = {
     return docs.map((doc) => toPlain<AttendanceRecord>(doc) as AttendanceRecord);
   },
 
+  async findByEmployeeIdsInRange(
+    employeeIds: string[],
+    from: Date,
+    to: Date,
+  ): Promise<AttendanceRecord[]> {
+    if (employeeIds.length === 0) {
+      return [];
+    }
+    const ids = employeeIds.map(asObjectId).filter((id): id is mongoose.Types.ObjectId => id !== null);
+    if (ids.length === 0) {
+      return [];
+    }
+    const docs = await Attendance.find({
+      employeeId: { $in: ids },
+      date: { $gte: startOfUtcDay(from), $lte: startOfUtcDay(to) },
+    }).sort({ date: 1 });
+    return docs.map((doc) => toPlain<AttendanceRecord>(doc) as AttendanceRecord);
+  },
+
+  async findInRange(from: Date, to: Date): Promise<AttendanceRecord[]> {
+    const docs = await Attendance.find({
+      date: { $gte: startOfUtcDay(from), $lte: startOfUtcDay(to) },
+    }).sort({ date: 1 });
+    return docs.map((doc) => toPlain<AttendanceRecord>(doc) as AttendanceRecord);
+  },
+
   async findOverlapping(employeeId: string, from: Date, to: Date): Promise<AttendanceRecord[]> {
     return this.findByEmployeeInRange(employeeId, from, to);
   },

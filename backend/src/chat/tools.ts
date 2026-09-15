@@ -1,19 +1,9 @@
 import type { ChatCompletionTool } from "openai/resources/chat/completions";
 import { companyPolicies } from "../config/policies.js";
-import { attendanceRepository } from "../repository/attendance.repository.js";
 import { applyLeaveForEmployee } from "../services/leave.service.js";
-import { timesheetRepository } from "../repository/timesheet.repository.js";
+import { getLeaveBalance, getTimesheetWeek } from "../services/dashboard.service.js";
 import { userRepository } from "../repository/user.repository.js";
-import { companyCalendarDate, toDateKey, utcQuarterRange, utcWeekRange } from "./dates.js";
-
-const LEAVE_LABELS = {
-  paid: "PL",
-  sick: "SL",
-  casual: "CL",
-  optional: "OL",
-} as const;
-
-type LeaveKey = keyof typeof LEAVE_LABELS;
+import { companyCalendarDate, toDateKey } from "./dates.js";
 
 export const chatTools: ChatCompletionTool[] = [
   {
@@ -147,70 +137,17 @@ export async function runChatTool(name: string, employeeId: string, rawArgs?: st
   }
 
   if (name === "get_my_leave_balance") {
-    const { from, to, label } = utcQuarterRange();
-    const rows = await attendanceRepository.findByEmployeeInRange(employeeId, from, to);
-    const usedRows = rows.filter((row) => row.status === "approved" || row.status === "pending");
-    const usedByType: Record<LeaveKey, number> = { paid: 0, sick: 0, casual: 0, optional: 0 };
-    for (const row of usedRows) {
-      const key = row.leaveType as LeaveKey;
-      if (key in usedByType) {
-        usedByType[key] += 1;
-      }
-    }
-    const totalUsed = usedRows.length;
-    const remainingByType = (Object.keys(usedByType) as LeaveKey[]).reduce(
-      (acc, key) => {
-        acc[LEAVE_LABELS[key]] = Math.max(0, companyPolicies.attendance.perTypePerQuarter[key] - usedByType[key]);
-        return acc;
-      },
-      {} as Record<string, number>,
-    );
-    return JSON.stringify({
-      quarter: label,
-      from: toDateKey(from),
-      to: toDateKey(to),
-      used: {
-        total: totalUsed,
-        PL: usedByType.paid,
-        SL: usedByType.sick,
-        CL: usedByType.casual,
-        OL: usedByType.optional,
-      },
-      remaining: {
-        total: Math.max(0, companyPolicies.attendance.maxLeaveDaysPerQuarter - totalUsed),
-        ...remainingByType,
-      },
-      entitlements: {
-        total: companyPolicies.attendance.maxLeaveDaysPerQuarter,
-        PL: companyPolicies.attendance.perTypePerQuarter.paid,
-        SL: companyPolicies.attendance.perTypePerQuarter.sick,
-        CL: companyPolicies.attendance.perTypePerQuarter.casual,
-        OL: companyPolicies.attendance.perTypePerQuarter.optional,
-      },
-    });
+    return JSON.stringify(await getLeaveBalance(employeeId));
   }
 
   if (name === "get_my_timesheet_due") {
-    const { from, to, days } = utcWeekRange();
-    const rows = await timesheetRepository.findByEmployeeInRange(employeeId, from, to);
-    const byDate = new Map(rows.map((row) => [toDateKey(new Date(row.date)), row]));
-    const due: string[] = [];
-    const filled: { date: string; hours: number; status: string }[] = [];
-    for (const day of days) {
-      const key = toDateKey(day);
-      const row = byDate.get(key);
-      if (!row) {
-        due.push(key);
-      } else {
-        filled.push({ date: key, hours: row.hours, status: row.status });
-      }
-    }
+    const week = await getTimesheetWeek(employeeId);
     return JSON.stringify({
-      weekFrom: toDateKey(from),
-      weekTo: toDateKey(to),
-      due,
-      filled,
-      maxHoursPerWeek: companyPolicies.timesheet.maxHoursPerWeek,
+      weekFrom: week.weekFrom,
+      weekTo: week.weekTo,
+      due: week.dueDays,
+      filled: week.filledDays,
+      maxHoursPerWeek: week.maxHoursPerWeek,
     });
   }
 
